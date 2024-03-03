@@ -6,16 +6,52 @@ import (
 	"testing"
 )
 
+type test struct {
+	input  []byte
+	expect []*reading
+}
+
+func testCase(input string, expect ...*reading) (tc test) {
+	tc.input = []byte(input)
+	tc.expect = expect
+	return
+}
+
+func Test_parseRightLeftBytes(t *testing.T) {
+	testCases := []test{
+		testCase(
+			"x;4.2\nx;6.9\n",
+			&reading{station: []byte("x"), subzero: false, temp: temperature{0, 6, 9}},
+			&reading{station: []byte("x"), subzero: false, temp: temperature{0, 4, 2}},
+		),
+		testCase(
+			"x;4.2\nx;4.2\nx;6.9\n",
+			&reading{station: []byte("x"), subzero: false, temp: temperature{0, 6, 9}},
+			&reading{station: []byte("x"), subzero: false, temp: temperature{0, 4, 2}},
+			&reading{station: []byte("x"), subzero: false, temp: temperature{0, 4, 2}},
+		),
+		testCase(
+			"Aix-en-Provence;4.2\nx;6.9\n", // shortest valid byte slice
+			&reading{station: []byte("x"), subzero: false, temp: temperature{0, 6, 9}},
+			&reading{station: []byte("Aix-en-Provence"), subzero: false, temp: temperature{0, 4, 2}},
+		),
+	}
+	for _, tc := range testCases {
+		t.Run(string(tc.input), func(t *testing.T) {
+			readings := make(chan *reading)
+			wg := &sync.WaitGroup{}
+			wg.Add(1)
+			go func() {
+				parseLeftRightBytes(tc.input, readings)
+				wg.Done()
+			}()
+			assertReadings(t, tc.expect, readings)
+			wg.Wait()
+		})
+	}
+}
+
 func Test_parseBytes(t *testing.T) {
-	type test struct {
-		input  []byte
-		expect []*reading
-	}
-	testCase := func(input string, expect ...*reading) (tc test) {
-		tc.input = []byte(input)
-		tc.expect = expect
-		return
-	}
 	testCases := []test{
 		testCase(
 			"x;4.2\n", // shortest valid byte slice
@@ -104,32 +140,7 @@ func Test_parseBytes(t *testing.T) {
 				initialNL, terminalNL = parseBytes(tc.input, readings)
 				wg.Done()
 			}()
-			for _, expect := range tc.expect {
-				actual := <-readings
-				if actual == nil {
-					if expect != nil {
-						t.Errorf("expected reading; got nil")
-					}
-					return
-				}
-				if !bytes.Equal(expect.station, actual.station) {
-					t.Errorf("expected: %s; got: %s", expect.station, actual.station)
-				}
-				if actual.subzero != expect.subzero {
-					t.Errorf("expected subzero: %v; got: %v", expect.subzero, actual.subzero)
-				}
-				for i, v := range expect.temp {
-					if actual.temp[i] != v {
-						t.Errorf("expected offset %d to be: %d; got: %d", i, v, actual.temp[i])
-					}
-				}
-			}
-			if len(tc.expect) == 0 {
-				select {
-				case <-readings:
-					t.Errorf("unexpected reading")
-				}
-			}
+			assertReadings(t, tc.expect, readings)
 			wg.Wait()
 			expectInitialNL := bytes.IndexByte(tc.input, '\n')
 			expectTerminalNL := bytes.LastIndexByte(tc.input, '\n')
@@ -146,5 +157,40 @@ func Test_parseBytes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func assertReadings(t *testing.T, expected []*reading, readings <-chan *reading) {
+	t.Helper()
+	for _, expect := range expected {
+		actual := <-readings
+		if actual == nil {
+			if expect != nil {
+				t.Errorf("expected reading; got nil")
+			}
+			return
+		}
+		assertReading(t, expect, actual)
+	}
+	if len(expected) == 0 {
+		select {
+		case <-readings:
+			t.Errorf("unexpected reading")
+		}
+	}
+}
+
+func assertReading(t *testing.T, expect, actual *reading) {
+	t.Helper()
+	if !bytes.Equal(expect.station, actual.station) {
+		t.Errorf("expected: %s; got: %s", expect.station, actual.station)
+	}
+	if actual.subzero != expect.subzero {
+		t.Errorf("expected subzero: %v; got: %v", expect.subzero, actual.subzero)
+	}
+	for i, v := range expect.temp {
+		if actual.temp[i] != v {
+			t.Errorf("expected offset %d to be: %d; got: %d", i, v, actual.temp[i])
+		}
 	}
 }

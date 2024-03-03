@@ -1,5 +1,7 @@
 package report
 
+import "fmt"
+
 // temperature stores a decimal number between 0.0 and 99.9 inclusive as 3 uint8 values, representing the tens, ones,
 // and tenths places in the 0, 1, and 2 index, respectively.
 type temperature [3]uint8
@@ -12,9 +14,27 @@ type reading struct {
 
 const noNewline = -1
 
+const lenMinReading = len("x;0.0\n")
+
+func parseLeftRightBytes(d []byte, readings chan<- *reading) {
+	splitAt := len(d) / 2
+	initialNLRight, _ := parseBytes(d[splitAt:], readings)
+	initialNLLeft, terminalNLLeft := parseBytes(d[0:splitAt], readings)
+	cutBegin, cutEnd := terminalNLLeft, splitAt+initialNLRight
+	if cutEnd-cutBegin >= lenMinReading {
+		if initialNLLeft > noNewline {
+			parseBytes(d[cutBegin+1:cutEnd+1], readings)
+		} else {
+			parseBytes(d[cutBegin:cutEnd+1], readings)
+		}
+	} else if cutEnd-cutBegin > 0 {
+		panic("the ignored reading data is too short")
+	}
+}
+
 func parseBytes(d []byte, readings chan<- *reading) (initialNL, terminalNL int) {
-	if len(d) < len("n;0.0\n") {
-		panic("no bytes")
+	if len(d) < lenMinReading {
+		panic(fmt.Sprintf("too few bytes: \"%s\"", d))
 	}
 	initialNL = noNewline
 	i := len(d) - 1
@@ -64,7 +84,9 @@ consumeName:
 			parsed.station = d[i+1 : terminalNameByteIndex]
 			readings <- &parsed
 			i--
-			goto nextReading
+			if initialNL-lenMinReading >= -1 {
+				goto nextReading
+			}
 		}
 	}
 	if d[i] == '\n' {
