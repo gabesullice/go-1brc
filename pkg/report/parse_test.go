@@ -174,20 +174,6 @@ func assertReading(t *testing.T, expect *record, actual *record) {
 	if actual.sum != expect.sum {
 		t.Errorf("expected sum to be: %d; got: %d", expect.sum, actual.sum)
 	}
-	//stationHash := fnv.New64()
-	//var revStation []byte
-	//stationLen := len(expect.name)
-	//for i := range stationLen {
-	//	revStation = append(revStation, expect.name[stationLen-i-1])
-	//}
-	//_, err := stationHash.Write(revStation)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//expectHash := stationHash.Sum64()
-	//if actual.stationHash != expectHash {
-	//	t.Errorf("expected hash to be: %x; got: %x", stationHash.Sum64(), actual.stationHash)
-	//}
 }
 
 func Test_fnv(t *testing.T) {
