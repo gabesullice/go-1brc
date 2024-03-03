@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"hash/fnv"
+	"os"
 	"testing"
 )
 
@@ -15,6 +16,42 @@ func testCase(input string, expect ...*record) (tc test) {
 	tc.input = []byte(input)
 	tc.expect = expect
 	return
+}
+
+func Test_parseLargeFile(t *testing.T) {
+	f, err := os.Open("./testdata/measurements-10e5.txt")
+	if err != nil {
+		panic(err)
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		panic(err)
+	}
+	readings := &tree{}
+	buf := make([]byte, 0, maxReadLength)
+	parseFile(f, stat.Size(), buf, readings)
+	records := readings.flatten()
+	if len(records) != 413 {
+		t.Errorf("expected %d records; got: %d", 413, len(records))
+	}
+}
+
+func Test_parseFile(t *testing.T) {
+	f, err := os.Open("./testdata/measurements-10e1.txt")
+	if err != nil {
+		panic(err)
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		panic(err)
+	}
+	readings := &tree{}
+	buf := make([]byte, 0, maxReadLength)
+	parseFile(f, stat.Size(), buf, readings)
+	records := readings.flatten()
+	if len(records) != 90 {
+		t.Errorf("expected %d records; got: %d", 90, len(records))
+	}
 }
 
 func Test_parseFileLeftRight(t *testing.T) {
@@ -32,20 +69,41 @@ func Test_parseFileLeftRight(t *testing.T) {
 			&record{name: []byte("x"), min: 42, max: 420, sum: 42 + 420 + 42 + 69},
 		),
 		testCase(
-			"Aix-en-Provence;4.2\nx;6.9\n", // shortest valid byte slice
+			"Aix-en-Provence;4.2\nx;6.9\n",
 			&record{name: []byte("Aix-en-Provence"), min: 42, max: 42, sum: 42},
 			&record{name: []byte("x"), min: 69, max: 69, sum: 69},
 		),
 		testCase(
-			"bar;1.0\nfoo;2.0\nfoo;2.0\nfoo;2.0\nfoo;2.0\nfoo;2.0\nbar;1.0\nbar;1.0\nfoo;2.0\n", // shortest valid byte slice
-			&record{name: []byte("bar"), min: 10, max: 10, sum: 10 + 10 + 10},
-			&record{name: []byte("foo"), min: 20, max: 20, sum: 20 + 20 + 20 + 20 + 20 + 20},
+			"aaa;1.0\nbbb;1.0\nccc;1.0\nddd;1.0\neee;1.0\nfff;1.0\nggg;1.0\nhhh;1.0\niii;1.0\niii;1.0\n",
+			&record{name: []byte("aaa"), min: 10, max: 10, sum: 10},
+			&record{name: []byte("bbb"), min: 10, max: 10, sum: 10},
+			&record{name: []byte("ccc"), min: 10, max: 10, sum: 10},
+			&record{name: []byte("ddd"), min: 10, max: 10, sum: 10},
+			&record{name: []byte("eee"), min: 10, max: 10, sum: 10},
+			&record{name: []byte("fff"), min: 10, max: 10, sum: 10},
+			&record{name: []byte("ggg"), min: 10, max: 10, sum: 10},
+			&record{name: []byte("hhh"), min: 10, max: 10, sum: 10},
+			&record{name: []byte("iii"), min: 10, max: 10, sum: 20},
+		),
+		testCase(
+			"Jerusalem;25.8\nLa Paz;26.1\nDenpasar;16.2\nNew Delhi;20.7\nMandalay;21.2\nOdesa;17.1\nErbil;28.7\nSan Francisco;18.9\nAthens;21.4\nBangkok;26.5\n",
+			&record{name: []byte("Athens"), min: 214, max: 214, sum: 214},
+			&record{name: []byte("Bangkok"), min: 265, max: 265, sum: 265},
+			&record{name: []byte("Denpasar"), min: 162, max: 162, sum: 162},
+			&record{name: []byte("Erbil"), min: 287, max: 287, sum: 287},
+			&record{name: []byte("Jerusalem"), min: 258, max: 258, sum: 258},
+			&record{name: []byte("La Paz"), min: 261, max: 261, sum: 261},
+			&record{name: []byte("Mandalay"), min: 212, max: 212, sum: 212},
+			&record{name: []byte("New Delhi"), min: 207, max: 207, sum: 207},
+			&record{name: []byte("Odesa"), min: 171, max: 171, sum: 171},
+			&record{name: []byte("San Francisco"), min: 189, max: 189, sum: 189},
 		),
 	}
 	for _, tc := range testCases {
 		t.Run(string(tc.input), func(t *testing.T) {
 			readings := &tree{}
-			parseFileLeftRight(bytes.NewReader(tc.input), 0, len(tc.input), readings)
+			buf := make([]byte, 0, maxReadLength)
+			parseFile(bytes.NewReader(tc.input), int64(len(tc.input)), buf, readings)
 			assertReadings(t, tc.expect, readings)
 		})
 	}
@@ -90,65 +148,19 @@ func Test_parseBytes(t *testing.T) {
 			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
 		),
 		testCase(
-			"\nAix-en-Provence;-24.5\n",
-			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
-		),
-		testCase(
-			"ignore;-24.5\nAix-en-Provence;-24.5\n",
-			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
-		),
-		testCase(
-			"\nAix-en-Provence;-24.5\nignore;-",
-			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
-		),
-		testCase(
-			"ignore;-24.5\nAix-en-Provence;-24.5\nignore;-",
-			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
-		),
-		testCase(
 			"Aix-en-Provence;-24.5\nDenver;0.0\n",
-			&record{name: []byte("Denver"), min: 0, max: 0, sum: 0},
-		),
-		testCase(
-			"\nAix-en-Provence;-24.5\nDenver;0.0\n",
-			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
-			&record{name: []byte("Denver"), min: 0, max: 0, sum: 0},
-		),
-		testCase(
-			"ignore;-24.5\nAix-en-Provence;-24.5\nDenver;0.0\n",
-			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
-			&record{name: []byte("Denver"), min: 0, max: 0, sum: 0},
-		),
-		testCase(
-			"\nAix-en-Provence;-24.5\nDenver;0.0\nignore;-",
-			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
-			&record{name: []byte("Denver"), min: 0, max: 0, sum: 0},
-		),
-		testCase(
-			"ignore;-24.5\nAix-en-Provence;-24.5\nDenver;0.0\nignore;-",
 			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
 			&record{name: []byte("Denver"), min: 0, max: 0, sum: 0},
 		),
 	}
 	for _, tc := range testCases {
 		t.Run(string(tc.input), func(t *testing.T) {
-			var initialNL, terminalNL int
 			readings := &tree{}
-			initialNL, terminalNL = parseBytes(tc.input, readings)
+			terminalNL := parseBytes(tc.input, readings)
 			assertReadings(t, tc.expect, readings)
-			expectInitialNL := bytes.IndexByte(tc.input, '\n')
 			expectTerminalNL := bytes.LastIndexByte(tc.input, '\n')
 			if terminalNL != expectTerminalNL {
 				t.Errorf("expected terminal newline at: %d; got %d", expectTerminalNL, terminalNL)
-			}
-			if expectInitialNL == expectTerminalNL {
-				if initialNL != noNewline {
-					t.Errorf("expected initial newline at: %d; got %d", noNewline, initialNL)
-				}
-			} else {
-				if initialNL != expectInitialNL {
-					t.Errorf("expected initial newline at: %d; got %d", expectInitialNL, initialNL)
-				}
 			}
 		})
 	}
@@ -159,6 +171,7 @@ func assertReadings(t *testing.T, expected []*record, records *tree) {
 	actual := records.flatten()
 	if len(actual) != len(expected) {
 		t.Errorf("expected %d records; got %d", len(expected), len(actual))
+		return
 	}
 	for i, expect := range expected {
 		assertReading(t, expect, actual[i])
@@ -171,13 +184,13 @@ func assertReading(t *testing.T, expect *record, actual *record) {
 		t.Errorf("expected: %s; got: %s", expect.name, actual.name)
 	}
 	if actual.min != expect.min {
-		t.Errorf("expected min to be: %d; got: %d", expect.min, actual.min)
+		t.Errorf("expected %s min to be: %d; got: %d", expect.name, expect.min, actual.min)
 	}
 	if actual.max != expect.max {
-		t.Errorf("expected max to be: %d; got: %d", expect.max, actual.max)
+		t.Errorf("expected %s max to be: %d; got: %d", expect.name, expect.max, actual.max)
 	}
 	if actual.sum != expect.sum {
-		t.Errorf("expected sum to be: %d; got: %d", expect.sum, actual.sum)
+		t.Errorf("expected %s sum to be: %d; got: %d", expect.name, expect.sum, actual.sum)
 	}
 }
 

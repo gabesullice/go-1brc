@@ -15,7 +15,7 @@ type reading struct {
 
 const noNewline = -1
 
-const lenMinReading = len("x;0.0\n")
+const lenMinReading = len("A;0.0\n")
 
 const (
 	fnvOffsetBasis uint64 = 14695981039346656037
@@ -101,57 +101,40 @@ func (n *node) add(r *reading) {
 	n.record.count++
 }
 
-const maxReadLength = 2 << 4
+const maxReadLength = 2 << 13
 
-func parseFileLeftRight(f io.ReadSeeker, left, right int, readings *tree) (initialNL, terminalNL int) {
-	buf := make([]byte, 0, maxReadLength)
-	size := right - left
-	splitAt := left + size/2
-	if size > maxReadLength*2 {
-		parseFileLeftRight(f, left, splitAt, readings)
-		parseFileLeftRight(f, splitAt+1, right, readings)
-		return
-	}
-	if _, err := f.Seek(int64(left), io.SeekStart); err != nil {
-		panic(err)
-	}
-	buf = buf[:splitAt-left]
-	if _, err := io.ReadFull(f, buf); err != nil {
-		panic(err)
-	}
-	initialNLLeft, terminalNLLeft := parseBytes(buf, readings)
-	buf = buf[:right-splitAt]
-	if _, err := io.ReadFull(f, buf); err != nil {
-		panic(err)
-	}
-	initialNLRight, terminalNLRight := parseBytes(buf, readings)
-	cutBegin, cutEnd := left+terminalNLLeft, splitAt+initialNLRight
-	if cutEnd-cutBegin >= lenMinReading {
-		if initialNLLeft > noNewline {
-			cutBegin++
-		}
-		cutEnd++
-		if _, err := f.Seek(int64(cutBegin), io.SeekStart); err != nil {
-			panic(err)
-		}
-		buf = buf[:cutEnd-cutBegin]
-		if _, err := io.ReadFull(f, buf); err != nil {
-			panic(err)
-		}
-		parseBytes(buf, readings)
-	} else if cutEnd-cutBegin > 0 {
-		panic("the ignored reading data is too short")
-	}
-	return
+func parseFile(f io.ReaderAt, size int64, buf []byte, readings *tree) {
+	parseFileLeftRight(f, 0, int(size), buf, readings)
 }
 
-func parseBytes(d []byte, readings *tree) (initialNL, terminalNL int) {
+func parseFileLeftRight(f io.ReaderAt, left, right int, buf []byte, readings *tree) int {
+	size := right - left
+	if size <= cap(buf) {
+		buf = buf[:size]
+		if _, err := f.ReadAt(buf, int64(left)); err != nil {
+			panic(err)
+		}
+		tnl := left + parseBytes(buf, readings)
+		return tnl
+	}
+	half := size / 2
+	var splitAt int
+	if half > cap(buf) {
+		splitAt = left + half - (half % cap(buf))
+	} else {
+		splitAt = left + half
+	}
+	leftTNL := parseFileLeftRight(f, left, splitAt, buf, readings)
+	return parseFileLeftRight(f, leftTNL+1, right, buf, readings)
+}
+
+func parseBytes(d []byte, readings *tree) (terminalNL int) {
 	if len(d) < lenMinReading {
 		panic(fmt.Sprintf("too few bytes: \"%s\"", d))
 	}
-	initialNL = noNewline
 	i := len(d) - 1
 	// Ignore anything after the terminal newline in the byte slice.
+	terminalNL = noNewline
 	for ; i > 0; i-- {
 		if d[i] == '\n' {
 			terminalNL = i
@@ -160,7 +143,10 @@ func parseBytes(d []byte, readings *tree) (initialNL, terminalNL int) {
 		}
 	}
 	if i == 0 {
-		return
+		return terminalNL
+	}
+	if lenMinReading-i > 2 {
+		return terminalNL
 	}
 	var semicolonIndex int
 	// TODO: test if instantiating this as a pointer improves performance.
@@ -206,31 +192,17 @@ consumeName:
 	semicolonIndex = i
 	i--
 	parsed.stationHash = fnvOffsetBasis
-	for ; i > 0; i-- {
+	for ; i >= 0; i-- {
 		if d[i] == '\n' {
-			initialNL = i
 			parsed.station = d[i+1 : semicolonIndex]
 			saveReading()
 			i--
-			if initialNL-lenMinReading >= -1 {
-				goto nextReading
-			}
-		} else {
-			parsed.stationHash *= fnvPrime
-			parsed.stationHash ^= uint64(d[i])
+			goto nextReading
 		}
-	}
-	if i >= 0 && d[i] == '\n' {
-		parsed.station = d[i+1 : semicolonIndex]
-		saveReading()
-		return 0, terminalNL
-	}
-	if initialNL == noNewline {
-		parsed.station = d[i:semicolonIndex]
 		parsed.stationHash *= fnvPrime
 		parsed.stationHash ^= uint64(d[i])
-		saveReading()
-		return
 	}
-	return
+	parsed.station = d[:semicolonIndex]
+	saveReading()
+	return terminalNL
 }
