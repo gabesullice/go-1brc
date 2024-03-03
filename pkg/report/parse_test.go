@@ -2,16 +2,16 @@ package report
 
 import (
 	"bytes"
-	"sync"
+	"hash/fnv"
 	"testing"
 )
 
 type test struct {
 	input  []byte
-	expect []*reading
+	expect []*record
 }
 
-func testCase(input string, expect ...*reading) (tc test) {
+func testCase(input string, expect ...*record) (tc test) {
 	tc.input = []byte(input)
 	tc.expect = expect
 	return
@@ -21,32 +21,27 @@ func Test_parseRightLeftBytes(t *testing.T) {
 	testCases := []test{
 		testCase(
 			"x;4.2\nx;6.9\n",
-			&reading{station: []byte("x"), temperature: 69},
-			&reading{station: []byte("x"), temperature: 42},
+			&record{name: []byte("x"), min: 42, max: 69, sum: 42 + 69},
 		),
 		testCase(
 			"x;4.2\nx;4.2\nx;6.9\n",
-			&reading{station: []byte("x"), temperature: 69},
-			&reading{station: []byte("x"), temperature: 42},
-			&reading{station: []byte("x"), temperature: 42},
+			&record{name: []byte("x"), min: 42, max: 69, sum: 42 + 42 + 69},
+		),
+		testCase(
+			"x;4.2\nx;42.0\nx;4.2\nx;6.9\n",
+			&record{name: []byte("x"), min: 42, max: 420, sum: 42 + 420 + 42 + 69},
 		),
 		testCase(
 			"Aix-en-Provence;4.2\nx;6.9\n", // shortest valid byte slice
-			&reading{station: []byte("x"), temperature: 69},
-			&reading{station: []byte("Aix-en-Provence"), temperature: 42},
+			&record{name: []byte("Aix-en-Provence"), min: 42, max: 42, sum: 42},
+			&record{name: []byte("x"), min: 69, max: 69, sum: 69},
 		),
 	}
 	for _, tc := range testCases {
 		t.Run(string(tc.input), func(t *testing.T) {
-			readings := make(chan *reading)
-			wg := &sync.WaitGroup{}
-			wg.Add(1)
-			go func() {
-				parseLeftRightBytes(tc.input, readings)
-				wg.Done()
-			}()
+			readings := &tree{}
+			parseLeftRightBytes(tc.input, readings)
 			assertReadings(t, tc.expect, readings)
-			wg.Wait()
 		})
 	}
 }
@@ -55,93 +50,87 @@ func Test_parseBytes(t *testing.T) {
 	testCases := []test{
 		testCase(
 			"x;4.2\n", // shortest valid byte slice
-			&reading{station: []byte("x"), temperature: 42},
+			&record{name: []byte("x"), min: 42, max: 42, sum: 42},
 		),
 		testCase(
 			"Aix-en-Provence;0.0\n",
-			&reading{station: []byte("Aix-en-Provence"), temperature: 0},
+			&record{name: []byte("Aix-en-Provence"), min: 0, max: 0, sum: 0},
 		),
 		testCase(
 			"Aix-en-Provence;3.5\n",
-			&reading{station: []byte("Aix-en-Provence"), temperature: 35},
+			&record{name: []byte("Aix-en-Provence"), min: 35, max: 35, sum: 35},
 		),
 		testCase(
 			"Aix-en-Provence;30.5\n",
-			&reading{station: []byte("Aix-en-Provence"), temperature: 305},
+			&record{name: []byte("Aix-en-Provence"), min: 305, max: 305, sum: 305},
 		),
 		testCase(
 			"Aix-en-Provence;24.5\n",
-			&reading{station: []byte("Aix-en-Provence"), temperature: 245},
+			&record{name: []byte("Aix-en-Provence"), min: 245, max: 245, sum: 245},
 		),
 		testCase(
 			"Aix-en-Provence;-0.0\n",
-			&reading{station: []byte("Aix-en-Provence"), temperature: 0},
+			&record{name: []byte("Aix-en-Provence"), min: 0, max: 0, sum: 0},
 		),
 		testCase(
 			"Aix-en-Provence;-3.5\n",
-			&reading{station: []byte("Aix-en-Provence"), temperature: -35},
+			&record{name: []byte("Aix-en-Provence"), min: -35, max: -35, sum: -35},
 		),
 		testCase(
 			"Aix-en-Provence;-30.5\n",
-			&reading{station: []byte("Aix-en-Provence"), temperature: -305},
+			&record{name: []byte("Aix-en-Provence"), min: -305, max: -305, sum: -305},
 		),
 		testCase(
 			"Aix-en-Provence;-24.5\n",
-			&reading{station: []byte("Aix-en-Provence"), temperature: -245},
+			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
 		),
 		testCase(
 			"\nAix-en-Provence;-24.5\n",
-			&reading{station: []byte("Aix-en-Provence"), temperature: -245},
+			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
 		),
 		testCase(
 			"ignore;-24.5\nAix-en-Provence;-24.5\n",
-			&reading{station: []byte("Aix-en-Provence"), temperature: -245},
+			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
 		),
 		testCase(
 			"\nAix-en-Provence;-24.5\nignore;-",
-			&reading{station: []byte("Aix-en-Provence"), temperature: -245},
+			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
 		),
 		testCase(
 			"ignore;-24.5\nAix-en-Provence;-24.5\nignore;-",
-			&reading{station: []byte("Aix-en-Provence"), temperature: -245},
+			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
 		),
 		testCase(
 			"Aix-en-Provence;-24.5\nDenver;0.0\n",
-			&reading{station: []byte("Denver"), temperature: 0},
+			&record{name: []byte("Denver"), min: 0, max: 0, sum: 0},
 		),
 		testCase(
 			"\nAix-en-Provence;-24.5\nDenver;0.0\n",
-			&reading{station: []byte("Denver"), temperature: 0},
-			&reading{station: []byte("Aix-en-Provence"), temperature: -245},
+			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
+			&record{name: []byte("Denver"), min: 0, max: 0, sum: 0},
 		),
 		testCase(
 			"ignore;-24.5\nAix-en-Provence;-24.5\nDenver;0.0\n",
-			&reading{station: []byte("Denver"), temperature: 0},
-			&reading{station: []byte("Aix-en-Provence"), temperature: -245},
+			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
+			&record{name: []byte("Denver"), min: 0, max: 0, sum: 0},
 		),
 		testCase(
 			"\nAix-en-Provence;-24.5\nDenver;0.0\nignore;-",
-			&reading{station: []byte("Denver"), temperature: 0},
-			&reading{station: []byte("Aix-en-Provence"), temperature: -245},
+			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
+			&record{name: []byte("Denver"), min: 0, max: 0, sum: 0},
 		),
 		testCase(
 			"ignore;-24.5\nAix-en-Provence;-24.5\nDenver;0.0\nignore;-",
-			&reading{station: []byte("Denver"), temperature: 0},
-			&reading{station: []byte("Aix-en-Provence"), temperature: -245},
+			&record{name: []byte("Aix-en-Provence"), min: -245, max: -245, sum: -245},
+			&record{name: []byte("Denver"), min: 0, max: 0, sum: 0},
 		),
 	}
 	for _, tc := range testCases {
 		t.Run(string(tc.input), func(t *testing.T) {
-			readings := make(chan *reading)
-			wg := &sync.WaitGroup{}
-			wg.Add(1)
 			var initialNL, terminalNL int
-			go func() {
-				initialNL, terminalNL = parseBytes(tc.input, readings)
-				wg.Done()
-			}()
+			readings := &tree{}
+			initialNL, terminalNL = parseBytes(tc.input, readings)
 			assertReadings(t, tc.expect, readings)
-			wg.Wait()
 			expectInitialNL := bytes.IndexByte(tc.input, '\n')
 			expectTerminalNL := bytes.LastIndexByte(tc.input, '\n')
 			if terminalNL != expectTerminalNL {
@@ -160,32 +149,66 @@ func Test_parseBytes(t *testing.T) {
 	}
 }
 
-func assertReadings(t *testing.T, expected []*reading, readings <-chan *reading) {
+func assertReadings(t *testing.T, expected []*record, records *tree) {
 	t.Helper()
-	for _, expect := range expected {
-		actual := <-readings
-		if actual == nil {
-			if expect != nil {
-				t.Errorf("expected reading; got nil")
-			}
-			return
-		}
-		assertReading(t, expect, actual)
+	actual := records.flatten()
+	if len(actual) != len(expected) {
+		t.Errorf("expected %d records; got %d", len(expected), len(actual))
 	}
-	if len(expected) == 0 {
-		select {
-		case <-readings:
-			t.Errorf("unexpected reading")
-		}
+	for i, expect := range expected {
+		assertReading(t, expect, actual[i])
 	}
 }
 
-func assertReading(t *testing.T, expect, actual *reading) {
+func assertReading(t *testing.T, expect *record, actual *record) {
 	t.Helper()
-	if !bytes.Equal(expect.station, actual.station) {
-		t.Errorf("expected: %s; got: %s", expect.station, actual.station)
+	if !bytes.Equal(expect.name, actual.name) {
+		t.Errorf("expected: %s; got: %s", expect.name, actual.name)
 	}
-	if actual.temperature != expect.temperature {
-		t.Errorf("expected temp to be: %d; got: %d", expect.temperature, actual.temperature)
+	if actual.min != expect.min {
+		t.Errorf("expected min to be: %d; got: %d", expect.min, actual.min)
+	}
+	if actual.max != expect.max {
+		t.Errorf("expected max to be: %d; got: %d", expect.max, actual.max)
+	}
+	if actual.sum != expect.sum {
+		t.Errorf("expected sum to be: %d; got: %d", expect.sum, actual.sum)
+	}
+	//stationHash := fnv.New64()
+	//var revStation []byte
+	//stationLen := len(expect.name)
+	//for i := range stationLen {
+	//	revStation = append(revStation, expect.name[stationLen-i-1])
+	//}
+	//_, err := stationHash.Write(revStation)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//expectHash := stationHash.Sum64()
+	//if actual.stationHash != expectHash {
+	//	t.Errorf("expected hash to be: %x; got: %x", stationHash.Sum64(), actual.stationHash)
+	//}
+}
+
+func Test_fnv(t *testing.T) {
+	expect := fnv.New64()
+	expect.Write([]byte("x"))
+	hash := fnvOffsetBasis
+	hash *= fnvPrime
+	hash ^= uint64('x')
+	if hash != expect.Sum64() {
+		t.FailNow()
+	}
+	expect = fnv.New64()
+	expect.Write([]byte("xyz"))
+	hash = fnvOffsetBasis
+	hash *= fnvPrime
+	hash ^= uint64('x')
+	hash *= fnvPrime
+	hash ^= uint64('y')
+	hash *= fnvPrime
+	hash ^= uint64('z')
+	if hash != expect.Sum64() {
+		t.FailNow()
 	}
 }
