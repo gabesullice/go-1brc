@@ -2,14 +2,9 @@ package report
 
 import "fmt"
 
-// temperature stores a decimal number between 0.0 and 99.9 inclusive as 3 uint8 values, representing the tens, ones,
-// and tenths places in the 0, 1, and 2 index, respectively.
-type temperature [3]uint8
-
 type reading struct {
-	station []byte
-	subzero bool
-	temp    temperature
+	station     []byte
+	temperature int64
 }
 
 const noNewline = -1
@@ -49,39 +44,43 @@ func parseBytes(d []byte, readings chan<- *reading) (initialNL, terminalNL int) 
 	if i == 0 {
 		return
 	}
-	var terminalNameByteIndex int
+	var semicolonIndex int
 nextReading:
 	// TODO: test if instantiating this as a pointer improves performance.
 	parsed := reading{}
 	// Tenths
-	parsed.temp[2] = d[i] &^ '0'
+	temp := d[i] &^ '0'
 	i -= 2 // skip the dot
 	// Ones
-	parsed.temp[1] = d[i] &^ '0'
+	temp += d[i] &^ '0' * 10
 	i--
 	// If a semicolon, return early, the rest is the name.
 	if d[i] == ';' {
 		parsed.station = d[0:i]
+		parsed.temperature = int64(temp)
 		goto consumeName
 	}
 	// Either a minus or a number in the tens place.
 	if d[i] != '-' {
-		parsed.temp[0] = d[i] &^ '0'
+		parsed.temperature = int64(d[i]&^'0')*100 + int64(temp)
 		i--
+	} else {
+		parsed.temperature = int64(temp)
 	}
 	// Must either be a hyphen-minus or semicolon.
 	if d[i] == '-' {
 		// It's a hyphen-minus, so the temp is negative.
-		parsed.subzero = true
+		parsed.temperature *= -1
 		i--
 	}
-	// d[i] must be a semicolon at this point.
 consumeName:
-	terminalNameByteIndex = i
+	// d[i] must be a semicolon at this point.
+	semicolonIndex = i
+	i--
 	for ; i > 0; i-- {
 		if d[i] == '\n' {
 			initialNL = i
-			parsed.station = d[i+1 : terminalNameByteIndex]
+			parsed.station = d[i+1 : semicolonIndex]
 			readings <- &parsed
 			i--
 			if initialNL-lenMinReading >= -1 {
@@ -90,12 +89,12 @@ consumeName:
 		}
 	}
 	if d[i] == '\n' {
-		parsed.station = d[i+1 : terminalNameByteIndex]
+		parsed.station = d[i+1 : semicolonIndex]
 		readings <- &parsed
 		return 0, terminalNL
 	}
 	if initialNL == noNewline {
-		parsed.station = d[i:terminalNameByteIndex]
+		parsed.station = d[i:semicolonIndex]
 		readings <- &parsed
 		return
 	}
