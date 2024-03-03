@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"slices"
 )
 
@@ -54,7 +55,7 @@ func newNode(r *reading) *node {
 	n := &node{
 		hash: r.stationHash,
 		record: &record{
-			name:  r.station,
+			name:  slices.Clone(r.station),
 			count: 1,
 		},
 	}
@@ -100,20 +101,48 @@ func (n *node) add(r *reading) {
 	n.record.count++
 }
 
-func parseLeftRightBytes(d []byte, readings *tree) {
-	splitAt := len(d) / 2
-	initialNLRight, _ := parseBytes(d[splitAt:], readings)
-	initialNLLeft, terminalNLLeft := parseBytes(d[0:splitAt], readings)
-	cutBegin, cutEnd := terminalNLLeft, splitAt+initialNLRight
+const maxReadLength = 2 << 4
+
+func parseFileLeftRight(f io.ReadSeeker, left, right int, readings *tree) (initialNL, terminalNL int) {
+	buf := make([]byte, 0, maxReadLength)
+	size := right - left
+	splitAt := left + size/2
+	if size > maxReadLength*2 {
+		parseFileLeftRight(f, left, splitAt, readings)
+		parseFileLeftRight(f, splitAt+1, right, readings)
+		return
+	}
+	if _, err := f.Seek(int64(left), io.SeekStart); err != nil {
+		panic(err)
+	}
+	buf = buf[:splitAt-left]
+	if _, err := io.ReadFull(f, buf); err != nil {
+		panic(err)
+	}
+	initialNLLeft, terminalNLLeft := parseBytes(buf, readings)
+	buf = buf[:right-splitAt]
+	if _, err := io.ReadFull(f, buf); err != nil {
+		panic(err)
+	}
+	initialNLRight, terminalNLRight := parseBytes(buf, readings)
+	cutBegin, cutEnd := left+terminalNLLeft, splitAt+initialNLRight
 	if cutEnd-cutBegin >= lenMinReading {
 		if initialNLLeft > noNewline {
-			parseBytes(d[cutBegin+1:cutEnd+1], readings)
-		} else {
-			parseBytes(d[cutBegin:cutEnd+1], readings)
+			cutBegin++
 		}
+		cutEnd++
+		if _, err := f.Seek(int64(cutBegin), io.SeekStart); err != nil {
+			panic(err)
+		}
+		buf = buf[:cutEnd-cutBegin]
+		if _, err := io.ReadFull(f, buf); err != nil {
+			panic(err)
+		}
+		parseBytes(buf, readings)
 	} else if cutEnd-cutBegin > 0 {
 		panic("the ignored reading data is too short")
 	}
+	return
 }
 
 func parseBytes(d []byte, readings *tree) (initialNL, terminalNL int) {
@@ -154,9 +183,8 @@ nextReading:
 	// Ones
 	temp += d[i] &^ '0' * 10
 	i--
-	// If a semicolon, return early, the rest is the name.
+	// If a semicolon, there aren't any more temperature bytes to parse, skip to parsing the name.
 	if d[i] == ';' {
-		parsed.station = d[0:i]
 		parsed.temperature = int64(temp)
 		goto consumeName
 	}
@@ -192,7 +220,7 @@ consumeName:
 			parsed.stationHash ^= uint64(d[i])
 		}
 	}
-	if d[i] == '\n' {
+	if i >= 0 && d[i] == '\n' {
 		parsed.station = d[i+1 : semicolonIndex]
 		saveReading()
 		return 0, terminalNL

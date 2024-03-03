@@ -17,7 +17,7 @@ func testCase(input string, expect ...*record) (tc test) {
 	return
 }
 
-func Test_parseRightLeftBytes(t *testing.T) {
+func Test_parseFileLeftRight(t *testing.T) {
 	testCases := []test{
 		testCase(
 			"x;4.2\nx;6.9\n",
@@ -36,11 +36,16 @@ func Test_parseRightLeftBytes(t *testing.T) {
 			&record{name: []byte("Aix-en-Provence"), min: 42, max: 42, sum: 42},
 			&record{name: []byte("x"), min: 69, max: 69, sum: 69},
 		),
+		testCase(
+			"bar;1.0\nfoo;2.0\nfoo;2.0\nfoo;2.0\nfoo;2.0\nfoo;2.0\nbar;1.0\nbar;1.0\nfoo;2.0\n", // shortest valid byte slice
+			&record{name: []byte("bar"), min: 10, max: 10, sum: 10 + 10 + 10},
+			&record{name: []byte("foo"), min: 20, max: 20, sum: 20 + 20 + 20 + 20 + 20 + 20},
+		),
 	}
 	for _, tc := range testCases {
 		t.Run(string(tc.input), func(t *testing.T) {
 			readings := &tree{}
-			parseLeftRightBytes(tc.input, readings)
+			parseFileLeftRight(bytes.NewReader(tc.input), 0, len(tc.input), readings)
 			assertReadings(t, tc.expect, readings)
 		})
 	}
