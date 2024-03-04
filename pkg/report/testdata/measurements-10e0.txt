@@ -1,0 +1,10 @@
+Jerusalem;25.8
+La Paz;26.1
+Denpasar;16.2
+New Delhi;20.7
+Mandalay;21.2
+Odesa;17.1
+Erbil;28.7
+San Francisco;18.9
+Athens;21.4
+Bangkok;26.5
