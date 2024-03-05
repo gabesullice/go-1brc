@@ -18,18 +18,21 @@ func testCase(input string, expect ...*record) (tc test) {
 	return
 }
 
+func Test_bytesAfterLastByte(t *testing.T) {
+	haystack := []byte("Aix-en-Provence;4.2\nx;6.9")
+	actual := bytesAfterLastByte(bytes.NewReader(haystack), len(haystack), '\n')
+	expect := 5
+	if expect != actual {
+		t.Errorf("expected: %d; got: %d", expect, actual)
+	}
+}
+
 func Test_parseLargeFile(t *testing.T) {
 	f, err := os.Open("./testdata/measurements-10e5.txt")
 	if err != nil {
 		panic(err)
 	}
-	stat, err := f.Stat()
-	if err != nil {
-		panic(err)
-	}
-	readings := &tree{}
-	buf := make([]byte, 0, maxReadLength)
-	parseFile(f, stat.Size(), buf, readings)
+	readings := parseFile(f)
 	records := readings.flatten()
 	if len(records) != 413 {
 		t.Errorf("expected %d records; got: %d", 413, len(records))
@@ -41,20 +44,14 @@ func Test_parseFile(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	stat, err := f.Stat()
-	if err != nil {
-		panic(err)
-	}
-	readings := &tree{}
-	buf := make([]byte, 0, maxReadLength)
-	parseFile(f, stat.Size(), buf, readings)
+	readings := parseFile(f)
 	records := readings.flatten()
 	if len(records) != 90 {
 		t.Errorf("expected %d records; got: %d", 90, len(records))
 	}
 }
 
-func Test_parseFileLeftRight(t *testing.T) {
+func Test_parseComplete(t *testing.T) {
 	testCases := []test{
 		testCase(
 			"x;4.2\nx;6.9\n",
@@ -103,7 +100,7 @@ func Test_parseFileLeftRight(t *testing.T) {
 		t.Run(string(tc.input), func(t *testing.T) {
 			readings := &tree{}
 			buf := make([]byte, 0, maxReadLength)
-			parseFile(bytes.NewReader(tc.input), int64(len(tc.input)), buf, readings)
+			parseComplete(bytes.NewReader(tc.input), len(tc.input), buf, readings)
 			assertReadings(t, tc.expect, readings)
 		})
 	}

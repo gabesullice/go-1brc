@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"slices"
+	"sync"
 )
 
 type reading struct {
@@ -28,12 +30,50 @@ type record struct {
 	count         uint64
 }
 
+func (r *record) add(other *record) {
+	if !bytes.Equal(other.name, r.name) {
+		panic("records do not match")
+	}
+	if other.min < r.min {
+		r.min = other.min
+	}
+	if other.max > r.max {
+		r.max = other.max
+	}
+	r.sum += other.sum
+	r.count += other.count
+}
+
 func compareRecords(a, b *record) int {
 	return bytes.Compare(a.name, b.name)
 }
 
 type tree struct {
 	root *node
+}
+
+func (t *tree) merge(other *tree) *tree {
+	if other.root == nil {
+		return t
+	}
+	if t.root == nil {
+		return other
+	}
+	t.root = merge(t.root, other.root)
+	return t
+}
+
+func merge(a, b *node) *node {
+	if b.left != nil {
+		a = merge(a, b.left)
+		b.left = nil
+	}
+	if b.right != nil {
+		a = merge(a, b.right)
+		b.right = nil
+	}
+	a.insert(b)
+	return a
 }
 
 func (t *tree) flatten() []*record {
@@ -75,6 +115,29 @@ func (n *node) flatten() (records []*record) {
 	return append(records, n.record)
 }
 
+func (n *node) insert(other *node) {
+	if other.left != nil || other.right != nil {
+		panic("other node must not have children")
+	}
+	if other.hash < n.hash {
+		if n.left == nil {
+			n.left = other
+		} else {
+			n.left.insert(other)
+		}
+		return
+	}
+	if other.hash > n.hash {
+		if n.right == nil {
+			n.right = other
+		} else {
+			n.right.insert(other)
+		}
+		return
+	}
+	n.record.add(other.record)
+}
+
 func (n *node) add(r *reading) {
 	if r.stationHash < n.hash {
 		if n.left == nil {
@@ -103,8 +166,60 @@ func (n *node) add(r *reading) {
 
 const maxReadLength = 2 << 13
 
-func parseFile(f io.ReaderAt, size int64, buf []byte, readings *tree) {
-	parseFileLeftRight(f, 0, int(size), buf, readings)
+const concurrency = 2<<2 - 1
+
+func parseFile(f *os.File) *tree {
+	stat, err := f.Stat()
+	if err != nil {
+		panic(err)
+	}
+	size := stat.Size()
+	chunkSize := int(size / concurrency)
+	var offset int
+	wg := sync.WaitGroup{}
+	trees := make([]*tree, 0, concurrency)
+	for _ = range concurrency {
+		wg.Add(1)
+		clip := bytesAfterLastByte(f, offset+chunkSize, '\n')
+		t := new(tree)
+		go func(offset, chunkSize, clip int, readings *tree) {
+			buf := make([]byte, 0, maxReadLength)
+			parseFileLeftRight(f, offset, offset+chunkSize-clip, buf, readings)
+			wg.Done()
+		}(offset, chunkSize, clip, t)
+		trees = append(trees, t)
+		offset += chunkSize - clip
+	}
+	readings := new(tree)
+	buf := make([]byte, 0, maxReadLength)
+	parseFileLeftRight(f, offset, int(size), buf, readings)
+	wg.Wait()
+	for _, t := range trees {
+		readings.merge(t)
+	}
+	return readings
+}
+
+func bytesAfterLastByte(r io.ReaderAt, end int, b byte) (count int) {
+	bufSize := 2 << 8
+	if end < bufSize {
+		bufSize = end
+	}
+	buf := make([]byte, end)
+	if _, err := r.ReadAt(buf, int64(end-cap(buf))); err != nil {
+		panic(err)
+	}
+	for i := len(buf) - 1; i >= 0; i-- {
+		if buf[i] == b {
+			return count
+		}
+		count++
+	}
+	panic("not found")
+}
+
+func parseComplete(f io.ReaderAt, size int, buf []byte, readings *tree) {
+	parseFileLeftRight(f, 0, size, buf, readings)
 }
 
 func parseFileLeftRight(f io.ReaderAt, left, right int, buf []byte, readings *tree) int {
