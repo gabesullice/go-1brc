@@ -30,6 +30,18 @@ type record struct {
 	count         uint64
 }
 
+func (r *record) String() string {
+	var mean float64
+	minimum, maximum := float64(r.min), float64(r.max)
+	sum, count := int(r.sum), int(r.count)
+	if sum%count != 0 {
+		mean = float64(sum/count + 1)
+	} else {
+		mean = float64(sum / count)
+	}
+	return fmt.Sprintf("%s=%.1f/%.1f/%.1f", r.name, minimum/10, mean/10, maximum/10)
+}
+
 func (r *record) add(other *record) {
 	if !bytes.Equal(other.name, r.name) {
 		panic("records do not match")
@@ -167,6 +179,31 @@ func (n *node) add(r *reading) {
 const maxReadLength = 2 << 13
 
 const concurrency = 2<<2 - 1
+
+func Generate(f *os.File, out io.Writer) error {
+	readings := parseFile(f)
+	if _, err := out.Write([]byte("{")); err != nil {
+		return err
+	}
+	records := readings.flatten()
+	count := len(records)
+	if count >= 1 {
+		for i := range count - 1 {
+			rec := records[i].String() + ", "
+			if _, err := out.Write([]byte(rec)); err != nil {
+				return err
+			}
+		}
+		rec := records[count-1].String()
+		if _, err := out.Write([]byte(rec)); err != nil {
+			return err
+		}
+	}
+	if _, err := out.Write([]byte("}")); err != nil {
+		return err
+	}
+	return nil
+}
 
 func parseFile(f *os.File) *tree {
 	stat, err := f.Stat()
