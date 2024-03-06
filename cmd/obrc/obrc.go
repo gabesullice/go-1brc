@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/gabesullice/obrc-go/pkg/report"
 	"os"
+	"runtime"
 )
 
 const (
@@ -19,7 +20,8 @@ func main() {
 	}
 	f, err := os.Open(os.Args[1])
 	exitOnErr(err, ErrFileOpen)
-	exitOnErr(report.Generate(f, os.Stdout), ErrDefault)
+	concurrency := runtime.NumCPU() * 2
+	exitOnErr(report.Generate(os.Stdout, f, concurrency), ErrDefault)
 }
 
 func exitOnErr(err error, code int) {

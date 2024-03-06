@@ -5,8 +5,8 @@ import (
 	"os"
 )
 
-func Generate(f *os.File, out io.Writer) error {
-	readings := parseFile(f)
+func Generate(out io.Writer, f *os.File, concurrency int) error {
+	readings := parseFile(f, concurrency)
 	if _, err := out.Write([]byte("{")); err != nil {
 		return err
 	}

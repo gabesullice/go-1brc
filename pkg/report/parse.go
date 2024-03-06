@@ -8,8 +8,6 @@ import (
 
 const maxReadLength = 2 << 18
 
-const concurrency = 2<<4 - 1
-
 const lenMinReading = len("A;0.0\n")
 
 const (
@@ -17,13 +15,13 @@ const (
 	fnvPrime       uint32 = 16777619
 )
 
-func parseFile(f *os.File) *tree {
+func parseFile(f *os.File, concurrency int) *tree {
 	stat, err := f.Stat()
 	if err != nil {
 		panic(err)
 	}
 	size := stat.Size()
-	chunkSize := int(size / concurrency)
+	chunkSize := int(size) / concurrency
 	var offset int
 	wg := sync.WaitGroup{}
 	trees := make([]*tree, 0, concurrency)

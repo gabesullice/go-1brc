@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"hash/fnv"
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -32,7 +33,7 @@ func Test_parseLargeFile(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	readings := parseFile(f)
+	readings := parseFile(f, runtime.NumCPU()*2)
 	records := readings.flatten()
 	if len(records) != 413 {
 		t.Errorf("expected %d records; got: %d", 413, len(records))
@@ -44,7 +45,7 @@ func Test_parseFile(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	readings := parseFile(f)
+	readings := parseFile(f, runtime.NumCPU()*2)
 	records := readings.flatten()
 	if len(records) != 90 {
 		t.Errorf("expected %d records; got: %d", 90, len(records))
