@@ -2,7 +2,6 @@ package report
 
 import (
 	"io"
-	"os"
 	"sync"
 )
 
@@ -15,13 +14,8 @@ const (
 	fnvPrime       uint32 = 16777619
 )
 
-func parseFile(f *os.File, concurrency int) *tree {
-	stat, err := f.Stat()
-	if err != nil {
-		panic(err)
-	}
-	size := stat.Size()
-	chunkSize := int(size) / concurrency
+func parseFile(f io.ReaderAt, size, concurrency int) *tree {
+	chunkSize := size / concurrency
 	var offset int
 	wg := sync.WaitGroup{}
 	trees := make([]*tree, 0, concurrency)

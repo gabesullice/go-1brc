@@ -2,11 +2,10 @@ package report
 
 import (
 	"io"
-	"os"
 )
 
-func Generate(out io.Writer, f *os.File, concurrency int) error {
-	readings := parseFile(f, concurrency)
+func Generate(out io.Writer, f io.ReaderAt, size int, concurrency int) error {
+	readings := parseFile(f, size, concurrency)
 	if _, err := out.Write([]byte("{")); err != nil {
 		return err
 	}
