@@ -15,7 +15,9 @@ type reading struct {
 	temperature int64
 }
 
-const noNewline = -1
+const maxReadLength = 2 << 13
+
+const concurrency = 2<<2 - 1
 
 const lenMinReading = len("A;0.0\n")
 
@@ -61,7 +63,20 @@ func compareRecords(a, b *record) int {
 }
 
 type tree struct {
-	root *node
+	root    *node
+	addFunc func(r *reading)
+}
+
+func newTree() (t *tree) {
+	return new(tree)
+}
+
+func (t *tree) add(r *reading) {
+	if t.root == nil {
+		t.root = newNode(r)
+	} else {
+		t.root.add(r)
+	}
 }
 
 func (t *tree) merge(other *tree) *tree {
@@ -128,9 +143,6 @@ func (n *node) flatten() (records []*record) {
 }
 
 func (n *node) insert(other *node) {
-	if other.left != nil || other.right != nil {
-		panic("other node must not have children")
-	}
 	if other.hash < n.hash {
 		if n.left == nil {
 			n.left = other
@@ -176,10 +188,6 @@ func (n *node) add(r *reading) {
 	n.record.count++
 }
 
-const maxReadLength = 2 << 13
-
-const concurrency = 2<<2 - 1
-
 func Generate(f *os.File, out io.Writer) error {
 	readings := parseFile(f)
 	if _, err := out.Write([]byte("{")); err != nil {
@@ -215,10 +223,10 @@ func parseFile(f *os.File) *tree {
 	var offset int
 	wg := sync.WaitGroup{}
 	trees := make([]*tree, 0, concurrency)
-	for _ = range concurrency {
+	for range concurrency {
 		wg.Add(1)
 		clip := bytesAfterLastByte(f, offset+chunkSize, '\n')
-		t := new(tree)
+		t := newTree()
 		go func(offset, chunkSize, clip int, readings *tree) {
 			buf := make([]byte, 0, maxReadLength)
 			parseFileLeftRight(f, offset, offset+chunkSize-clip, buf, readings)
@@ -227,7 +235,7 @@ func parseFile(f *os.File) *tree {
 		trees = append(trees, t)
 		offset += chunkSize - clip
 	}
-	readings := new(tree)
+	readings := newTree()
 	buf := make([]byte, 0, maxReadLength)
 	parseFileLeftRight(f, offset, int(size), buf, readings)
 	wg.Wait()
@@ -261,32 +269,26 @@ func parseComplete(f io.ReaderAt, size int, buf []byte, readings *tree) {
 
 func parseFileLeftRight(f io.ReaderAt, left, right int, buf []byte, readings *tree) int {
 	size := right - left
-	if size <= cap(buf) {
+	if size <= maxReadLength {
 		buf = buf[:size]
 		if _, err := f.ReadAt(buf, int64(left)); err != nil {
 			panic(err)
 		}
-		tnl := left + parseBytes(buf, readings)
-		return tnl
+		return left + parseBytes(buf, readings)
 	}
 	half := size / 2
 	var splitAt int
-	if half > cap(buf) {
-		splitAt = left + half - (half % cap(buf))
+	if half > maxReadLength {
+		splitAt = left + half - (half % maxReadLength)
 	} else {
 		splitAt = left + half
 	}
-	leftTNL := parseFileLeftRight(f, left, splitAt, buf, readings)
-	return parseFileLeftRight(f, leftTNL+1, right, buf, readings)
+	return parseFileLeftRight(f, parseFileLeftRight(f, left, splitAt, buf, readings)+1, right, buf, readings)
 }
 
 func parseBytes(d []byte, readings *tree) (terminalNL int) {
-	if len(d) < lenMinReading {
-		panic(fmt.Sprintf("too few bytes: \"%s\"", d))
-	}
 	i := len(d) - 1
 	// Ignore anything after the terminal newline in the byte slice.
-	terminalNL = noNewline
 	for ; i > 0; i-- {
 		if d[i] == '\n' {
 			terminalNL = i
@@ -301,22 +303,11 @@ func parseBytes(d []byte, readings *tree) (terminalNL int) {
 		return terminalNL
 	}
 	var semicolonIndex int
-	// TODO: test if instantiating this as a pointer improves performance.
-	parsed := reading{}
-	var saveReading func()
-	saveReading = func() {
-		if readings.root == nil {
-			readings.root = newNode(&parsed)
-		} else {
-			readings.root.add(&parsed)
-		}
-		saveReading = func() {
-			readings.root.add(&parsed)
-		}
-	}
+	var temp uint8
+	parsed := new(reading)
 nextReading:
 	// Tenths
-	temp := d[i] &^ '0'
+	temp = d[i] &^ '0'
 	i -= 2 // skip the dot
 	// Ones
 	temp += d[i] &^ '0' * 10
@@ -347,7 +338,7 @@ consumeName:
 	for ; i >= 0; i-- {
 		if d[i] == '\n' {
 			parsed.station = d[i+1 : semicolonIndex]
-			saveReading()
+			readings.add(parsed)
 			i--
 			goto nextReading
 		}
@@ -355,6 +346,6 @@ consumeName:
 		parsed.stationHash ^= uint64(d[i])
 	}
 	parsed.station = d[:semicolonIndex]
-	saveReading()
+	readings.add(parsed)
 	return terminalNL
 }
