@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/gabesullice/obrc-go/pkg/report"
+	"github.com/gabesullice/go-1brc/pkg/report"
 	"os"
 	"runtime"
 )
