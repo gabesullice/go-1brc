@@ -6,9 +6,9 @@ import (
 	"sync"
 )
 
-const maxReadLength = 2 << 13
+const maxReadLength = 2 << 18
 
-const concurrency = 2<<2 - 1
+const concurrency = 2<<4 - 1
 
 const lenMinReading = len("A;0.0\n")
 
