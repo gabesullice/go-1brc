@@ -13,8 +13,8 @@ const concurrency = 2<<2 - 1
 const lenMinReading = len("A;0.0\n")
 
 const (
-	fnvOffsetBasis uint64 = 14695981039346656037
-	fnvPrime       uint64 = 1099511628211
+	fnvOffsetBasis uint32 = 2166136261
+	fnvPrime       uint32 = 16777619
 )
 
 func parseFile(f *os.File) *tree {
@@ -146,8 +146,8 @@ consumeName:
 			i--
 			goto nextReading
 		}
+		parsed.stationHash ^= uint32(d[i])
 		parsed.stationHash *= fnvPrime
-		parsed.stationHash ^= uint64(d[i])
 	}
 	parsed.station = d[:semicolonIndex]
 	readings.add(parsed)

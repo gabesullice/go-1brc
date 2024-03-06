@@ -2,6 +2,6 @@ package report
 
 type reading struct {
 	station     []byte
-	stationHash uint64
+	stationHash uint32
 	temperature int64
 }

@@ -192,24 +192,24 @@ func assertReading(t *testing.T, expect *record, actual *record) {
 }
 
 func Test_fnv(t *testing.T) {
-	expect := fnv.New64()
+	expect := fnv.New32a()
 	expect.Write([]byte("x"))
 	hash := fnvOffsetBasis
+	hash ^= uint32('x')
 	hash *= fnvPrime
-	hash ^= uint64('x')
-	if hash != expect.Sum64() {
+	if hash != expect.Sum32() {
 		t.FailNow()
 	}
-	expect = fnv.New64()
+	expect = fnv.New32a()
 	expect.Write([]byte("xyz"))
 	hash = fnvOffsetBasis
+	hash ^= uint32('x')
 	hash *= fnvPrime
-	hash ^= uint64('x')
+	hash ^= uint32('y')
 	hash *= fnvPrime
-	hash ^= uint64('y')
+	hash ^= uint32('z')
 	hash *= fnvPrime
-	hash ^= uint64('z')
-	if hash != expect.Sum64() {
+	if hash != expect.Sum32() {
 		t.FailNow()
 	}
 }

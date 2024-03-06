@@ -1,7 +1,7 @@
 package report
 
 type node struct {
-	hash        uint64
+	hash        uint32
 	left, right *node
 	record      *record
 }
