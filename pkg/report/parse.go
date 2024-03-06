@@ -54,7 +54,7 @@ func bytesAfterLastByte(r io.ReaderAt, end int, b byte) (count int) {
 	if end < bufSize {
 		bufSize = end
 	}
-	buf := make([]byte, end)
+	buf := make([]byte, bufSize)
 	if _, err := r.ReadAt(buf, int64(end-cap(buf))); err != nil {
 		panic(err)
 	}
