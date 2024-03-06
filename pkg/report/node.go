@@ -1,5 +1,7 @@
 package report
 
+import "bytes"
+
 type node struct {
 	hash        uint32
 	left, right *node
@@ -59,6 +61,11 @@ func (n *node) add(r *reading) {
 			n.right.add(r)
 		}
 		return
+	}
+	if !bytes.Equal(r.station, n.record.name) {
+		r.stationHash ^= n.hash
+		r.stationHash *= fnvPrime
+		n.add(r)
 	}
 	if r.temperature < n.record.min {
 		n.record.min = r.temperature
