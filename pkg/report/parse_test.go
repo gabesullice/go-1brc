@@ -99,7 +99,7 @@ func Test_parseComplete(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(string(tc.input), func(t *testing.T) {
-			readings := newTree()
+			readings := newHashMap(2 << 3)
 			buf := make([]byte, 0, maxReadLength)
 			parseComplete(bytes.NewReader(tc.input), len(tc.input), buf, readings)
 			assertReadings(t, tc.expect, readings)
@@ -153,7 +153,7 @@ func Test_parseBytes(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(string(tc.input), func(t *testing.T) {
-			readings := newTree()
+			readings := newHashMap(2 << 3)
 			terminalNL := parseBytes(tc.input, readings)
 			assertReadings(t, tc.expect, readings)
 			expectTerminalNL := bytes.LastIndexByte(tc.input, '\n')
@@ -164,7 +164,7 @@ func Test_parseBytes(t *testing.T) {
 	}
 }
 
-func assertReadings(t *testing.T, expected []*record, records *tree) {
+func assertReadings(t *testing.T, expected []*record, records *hashMap) {
 	t.Helper()
 	actual := records.flatten()
 	if len(actual) != len(expected) {

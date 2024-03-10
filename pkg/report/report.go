@@ -5,6 +5,8 @@ import (
 	"os"
 )
 
+const hashMapSize = 2 << 10
+
 func Generate(out io.Writer, f *os.File, concurrency int) error {
 	readings := parseFile(f, concurrency)
 	if _, err := out.Write([]byte("{")); err != nil {

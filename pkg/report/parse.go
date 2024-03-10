@@ -15,7 +15,7 @@ const (
 	fnvPrime       uint32 = 16777619
 )
 
-func parseFile(f *os.File, concurrency int) *tree {
+func parseFile(f *os.File, concurrency int) *hashMap {
 	stat, err := f.Stat()
 	if err != nil {
 		panic(err)
@@ -24,25 +24,25 @@ func parseFile(f *os.File, concurrency int) *tree {
 	chunkSize := int(size) / concurrency
 	var offset int
 	wg := sync.WaitGroup{}
-	trees := make([]*tree, 0, concurrency)
+	recordSets := make([]*hashMap, 0, concurrency)
 	for range concurrency {
 		wg.Add(1)
 		clip := bytesAfterLastByte(f, offset+chunkSize, '\n')
-		t := newTree()
-		go func(offset, chunkSize, clip int, readings *tree) {
+		t := newHashMap(hashMapSize)
+		go func(offset, chunkSize, clip int, readings *hashMap) {
 			buf := make([]byte, 0, maxReadLength)
 			parseFileLeftRight(f, offset, offset+chunkSize-clip, buf, readings)
 			wg.Done()
 		}(offset, chunkSize, clip, t)
-		trees = append(trees, t)
+		recordSets = append(recordSets, t)
 		offset += chunkSize - clip
 	}
-	readings := newTree()
+	readings := newHashMap(hashMapSize)
 	buf := make([]byte, 0, maxReadLength)
 	parseFileLeftRight(f, offset, int(size), buf, readings)
 	wg.Wait()
-	for _, t := range trees {
-		readings.merge(t)
+	for _, t := range recordSets {
+		readings = readings.merge(t)
 	}
 	return readings
 }
@@ -65,11 +65,11 @@ func bytesAfterLastByte(r io.ReaderAt, end int, b byte) (count int) {
 	panic("not found")
 }
 
-func parseComplete(f io.ReaderAt, size int, buf []byte, readings *tree) {
+func parseComplete(f io.ReaderAt, size int, buf []byte, readings *hashMap) {
 	parseFileLeftRight(f, 0, size, buf, readings)
 }
 
-func parseFileLeftRight(f io.ReaderAt, left, right int, buf []byte, readings *tree) int {
+func parseFileLeftRight(f io.ReaderAt, left, right int, buf []byte, readings *hashMap) int {
 	size := right - left
 	if size <= maxReadLength {
 		buf = buf[:size]
@@ -88,7 +88,7 @@ func parseFileLeftRight(f io.ReaderAt, left, right int, buf []byte, readings *tr
 	return parseFileLeftRight(f, parseFileLeftRight(f, left, splitAt, buf, readings)+1, right, buf, readings)
 }
 
-func parseBytes(d []byte, readings *tree) (terminalNL int) {
+func parseBytes(d []byte, readings *hashMap) (terminalNL int) {
 	i := len(d) - 1
 	// Ignore anything after the terminal newline in the byte slice.
 	for ; i > 0; i-- {

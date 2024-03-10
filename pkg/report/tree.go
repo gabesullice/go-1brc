@@ -3,8 +3,7 @@ package report
 import "slices"
 
 type tree struct {
-	root    *node
-	addFunc func(r *reading)
+	root *node
 }
 
 func newTree() (t *tree) {
